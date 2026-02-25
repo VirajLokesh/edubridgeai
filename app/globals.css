@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #f8fafc;
+  color: #0f172a;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.font-dyslexic {
+  font-family: Arial, sans-serif;
+  letter-spacing: 0.05em;
+}
+
+.high-contrast {
+  background-color: #000;
+  color: #fff;
+}
+
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.skip-link:focus {
+  left: 0;
+  top: 0;
+  width: auto;
+  height: auto;
+  background: #000;
+  color: #fff;
+  padding: 0.75rem 1rem;
+  z-index: 50;
+}
+
+@keyframes page-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-page {
+  animation: page-fade-in-up 0.25s ease-out;
+}
