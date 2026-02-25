@@ -3,13 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /* =========================================================
-   Supported languages for EduBridge AI
+   Supported languages
 ========================================================= */
 export type SpeechLanguage = "en" | "ta" | "te" | "hi";
 
 /* =========================================================
    Browser-only Web Speech API declarations
-   (Required for Vercel / Node build)
 ========================================================= */
 declare global {
   interface Window {
@@ -23,10 +22,12 @@ declare global {
 ========================================================= */
 export function useSpeech(language: SpeechLanguage = "en") {
   const recognitionRef = useRef<any>(null);
+
+  const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [transcript, setTranscript] = useState("");
 
-  // Map language code to browser locale
   const languageMap: Record<SpeechLanguage, string> = {
     en: "en-US",
     ta: "ta-IN",
@@ -34,14 +35,19 @@ export function useSpeech(language: SpeechLanguage = "en") {
     hi: "hi-IN",
   };
 
-  /* ---------- Initialize Speech Recognition ---------- */
+  /* ---------- Init Speech Recognition ---------- */
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
 
-    if (!SpeechRecognition) return;
+    if (!SpeechRecognition || !("speechSynthesis" in window)) {
+      setSupported(false);
+      return;
+    }
+
+    setSupported(true);
 
     const recognition = new SpeechRecognition();
     recognition.lang = languageMap[language];
@@ -49,23 +55,17 @@ export function useSpeech(language: SpeechLanguage = "en") {
     recognition.continuous = false;
 
     recognition.onresult = (event: any) => {
-      const text = event.results[0][0].transcript;
-      setTranscript(text);
+      setTranscript(event.results[0][0].transcript);
       setListening(false);
     };
 
-    recognition.onerror = () => {
-      setListening(false);
-    };
-
-    recognition.onend = () => {
-      setListening(false);
-    };
+    recognition.onerror = () => setListening(false);
+    recognition.onend = () => setListening(false);
 
     recognitionRef.current = recognition;
   }, [language]);
 
-  /* ---------- Start Speech-to-Text ---------- */
+  /* ---------- STT ---------- */
   const startListening = useCallback(() => {
     if (!recognitionRef.current) return;
     setTranscript("");
@@ -73,14 +73,13 @@ export function useSpeech(language: SpeechLanguage = "en") {
     recognitionRef.current.start();
   }, []);
 
-  /* ---------- Stop Speech-to-Text ---------- */
   const stopListening = useCallback(() => {
     if (!recognitionRef.current) return;
     recognitionRef.current.stop();
     setListening(false);
   }, []);
 
-  /* ---------- Text-to-Speech ---------- */
+  /* ---------- TTS ---------- */
   const speak = useCallback(
     (text: string) => {
       if (typeof window === "undefined") return;
@@ -88,21 +87,28 @@ export function useSpeech(language: SpeechLanguage = "en") {
 
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = languageMap[language];
+
+      utterance.onstart = () => setSpeaking(true);
+      utterance.onend = () => setSpeaking(false);
+      utterance.onerror = () => setSpeaking(false);
+
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utterance);
     },
     [language]
   );
 
-  /* ---------- Stop Text-to-Speech ---------- */
   const stopSpeaking = useCallback(() => {
     if (typeof window === "undefined") return;
     if (!("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
+    setSpeaking(false);
   }, []);
 
   return {
+    supported,
     listening,
+    speaking,
     transcript,
     startListening,
     stopListening,
