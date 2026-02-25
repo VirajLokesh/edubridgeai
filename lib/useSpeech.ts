@@ -2,82 +2,47 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type SpeechLanguage = "en" | "ta" | "te" | "hi";
+/**
+ * Web Speech API helper hook
+ * - Safe for Next.js + Vercel builds
+ * - Browser-only logic guarded properly
+ * - Uses `any` for SpeechRecognition to avoid Node.js type errors
+ */
 
-const STT_LANG_MAP: Record<SpeechLanguage, string> = {
-  en: "en-IN",
-  ta: "ta-IN",
-  te: "te-IN",
-  hi: "hi-IN"
-};
+// Declare browser-only globals so TypeScript doesn't fail on Vercel
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
 
-const TTS_LANG_MAP: Record<SpeechLanguage, string> = {
-  en: "en-IN",
-  ta: "ta-IN",
-  te: "te-IN",
-  hi: "hi-IN"
-};
-
-type UseSpeechOptions = {
-  initialLanguage?: SpeechLanguage;
-};
-
-type UseSpeechReturn = {
-  supported: boolean;
-  listening: boolean;
-  speaking: boolean;
-  transcript: string;
-  error: string | null;
-  language: SpeechLanguage;
-  setLanguage: (lang: SpeechLanguage) => void;
-  startListening: () => void;
-  stopListening: () => void;
-  clearTranscript: () => void;
-  speak: (text: string) => void;
-};
-
-export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
-  const [supported, setSupported] = useState(false);
+export function useSpeech() {
+  const recognitionRef = useRef<any>(null);
   const [listening, setListening] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [language, setLanguage] = useState<SpeechLanguage>(
-    options.initialLanguage ?? "en"
-  );
 
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-
+  // Initialize SpeechRecognition safely
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const SpeechRecognitionImpl =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition ||
-      null;
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
-    if (!SpeechRecognitionImpl || !("speechSynthesis" in window)) {
-      setSupported(false);
-      return;
-    }
+    if (!SpeechRecognition) return;
 
-    setSupported(true);
-
-    const recognition: SpeechRecognition = new SpeechRecognitionImpl();
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
     recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = STT_LANG_MAP[language];
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let text = "";
-      for (let i = 0; i < event.results.length; i++) {
-        text += event.results[i][0].transcript;
-      }
-      setTranscript(text.trim());
+    recognition.onresult = (event: any) => {
+      const text = event.results[0][0].transcript;
+      setTranscript(text);
+      setListening(false);
     };
 
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      setError(event.error);
+    recognition.onerror = () => {
       setListening(false);
     };
 
@@ -86,80 +51,46 @@ export function useSpeech(options: UseSpeechOptions = {}): UseSpeechReturn {
     };
 
     recognitionRef.current = recognition;
-
-    return () => {
-      recognition.stop();
-      recognitionRef.current = null;
-    };
   }, []);
 
-  useEffect(() => {
-    if (!recognitionRef.current) return;
-    recognitionRef.current.lang = STT_LANG_MAP[language];
-  }, [language]);
-
+  // Start speech-to-text
   const startListening = useCallback(() => {
     if (!recognitionRef.current) return;
-    setError(null);
     setTranscript("");
-    try {
-      recognitionRef.current.start();
-      setListening(true);
-    } catch {
-      setError("Unable to start speech recognition.");
-    }
+    setListening(true);
+    recognitionRef.current.start();
   }, []);
 
+  // Stop speech-to-text
   const stopListening = useCallback(() => {
     if (!recognitionRef.current) return;
     recognitionRef.current.stop();
     setListening(false);
   }, []);
 
-  const clearTranscript = useCallback(() => {
-    setTranscript("");
+  // Text-to-speech (TTS)
+  const speak = useCallback((text: string) => {
+    if (typeof window === "undefined") return;
+    if (!("speechSynthesis" in window)) return;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
   }, []);
 
-  const speak = useCallback(
-    (text: string) => {
-      if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-        return;
-      }
-      if (!text.trim()) return;
-
-      if (window.speechSynthesis.speaking) {
-        window.speechSynthesis.cancel();
-        setSpeaking(false);
-        return;
-      }
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = TTS_LANG_MAP[language];
-      utterance.onstart = () => setSpeaking(true);
-      utterance.onend = () => setSpeaking(false);
-      utterance.onerror = () => {
-        setSpeaking(false);
-        setError("Unable to speak text.");
-      };
-
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
-    },
-    [language]
-  );
+  const stopSpeaking = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (!("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+  }, []);
 
   return {
-    supported,
     listening,
-    speaking,
     transcript,
-    error,
-    language,
-    setLanguage,
     startListening,
     stopListening,
-    clearTranscript,
-    speak
+    speak,
+    stopSpeaking,
   };
 }
-
