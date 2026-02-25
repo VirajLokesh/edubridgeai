@@ -1,48 +1,55 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-/* =========================================================
-   Supported languages
-========================================================= */
-export type SpeechLanguage = "en" | "ta" | "te" | "hi";
+/**
+ * Supported language codes
+ */
+export type SpeechLanguage = "en" | "hi" | "ta" | "te";
 
-/* =========================================================
-   Browser-only Web Speech API declarations
-========================================================= */
-declare global {
-  interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
-  }
-}
+/**
+ * Hook return type (explicit for Next.js / Vercel)
+ */
+export type UseSpeechReturn = {
+  supported: boolean;
+  listening: boolean;
+  speaking: boolean;
+  transcript: string;
+  startListening: () => void;
+  stopListening: () => void;
+  clearTranscript: () => void;
+  speak: (text: string) => void;
+  error: string | null;
+  speechLang: SpeechLanguage;
+  setSpeechLang: React.Dispatch<React.SetStateAction<SpeechLanguage>>;
+};
 
-/* =========================================================
-   useSpeech Hook
-========================================================= */
-export function useSpeech(language: SpeechLanguage = "en") {
-  const recognitionRef = useRef<any>(null);
-
+export function useSpeech(
+  initialLang: SpeechLanguage = "en"
+): UseSpeechReturn {
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [speechLang, setSpeechLang] =
+    useState<SpeechLanguage>(initialLang);
 
-  const languageMap: Record<SpeechLanguage, string> = {
-    en: "en-US",
-    ta: "ta-IN",
-    te: "te-IN",
-    hi: "hi-IN",
-  };
+  const recognitionRef = useRef<any>(null);
+  const synthRef =
+    typeof window !== "undefined"
+      ? window.speechSynthesis
+      : null;
 
-  /* ---------- Init Speech Recognition ---------- */
+  // Detect browser support
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
 
-    if (!SpeechRecognition || !("speechSynthesis" in window)) {
+    if (!SpeechRecognition || !synthRef) {
       setSupported(false);
       return;
     }
@@ -50,60 +57,61 @@ export function useSpeech(language: SpeechLanguage = "en") {
     setSupported(true);
 
     const recognition = new SpeechRecognition();
-    recognition.lang = languageMap[language];
-    recognition.interimResults = false;
+    recognition.lang = mapLang(speechLang);
     recognition.continuous = false;
+    recognition.interimResults = false;
 
-    recognition.onresult = (event: any) => {
-      setTranscript(event.results[0][0].transcript);
+    recognition.onstart = () => {
+      setListening(true);
+      setError(null);
+    };
+
+    recognition.onend = () => {
       setListening(false);
     };
 
-    recognition.onerror = () => setListening(false);
-    recognition.onend = () => setListening(false);
+    recognition.onerror = (e: any) => {
+      setError(e?.error || "Speech recognition error");
+      setListening(false);
+    };
+
+    recognition.onresult = (event: any) => {
+      const text = Array.from(event.results)
+        .map((r: any) => r[0].transcript)
+        .join(" ");
+      setTranscript(text);
+    };
 
     recognitionRef.current = recognition;
-  }, [language]);
+  }, [speechLang, synthRef]);
 
-  /* ---------- STT ---------- */
-  const startListening = useCallback(() => {
-    if (!recognitionRef.current) return;
-    setTranscript("");
-    setListening(true);
+  const startListening = () => {
+    if (!supported || !recognitionRef.current) return;
     recognitionRef.current.start();
-  }, []);
+  };
 
-  const stopListening = useCallback(() => {
-    if (!recognitionRef.current) return;
-    recognitionRef.current.stop();
+  const stopListening = () => {
+    recognitionRef.current?.stop();
     setListening(false);
-  }, []);
+  };
 
-  /* ---------- TTS ---------- */
-  const speak = useCallback(
-    (text: string) => {
-      if (typeof window === "undefined") return;
-      if (!("speechSynthesis" in window)) return;
+  const clearTranscript = () => {
+    setTranscript("");
+  };
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = languageMap[language];
+  const speak = (text: string) => {
+    if (!synthRef || !text) return;
 
-      utterance.onstart = () => setSpeaking(true);
-      utterance.onend = () => setSpeaking(false);
-      utterance.onerror = () => setSpeaking(false);
+    synthRef.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = mapLang(speechLang);
 
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
-    },
-    [language]
-  );
+    utterance.onstart = () => setSpeaking(true);
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
 
-  const stopSpeaking = useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (!("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    setSpeaking(false);
-  }, []);
+    synthRef.speak(utterance);
+  };
 
   return {
     supported,
@@ -112,7 +120,23 @@ export function useSpeech(language: SpeechLanguage = "en") {
     transcript,
     startListening,
     stopListening,
+    clearTranscript,
     speak,
-    stopSpeaking,
+    error,
+    speechLang,
+    setSpeechLang
   };
+}
+
+function mapLang(lang: SpeechLanguage) {
+  switch (lang) {
+    case "hi":
+      return "hi-IN";
+    case "ta":
+      return "ta-IN";
+    case "te":
+      return "te-IN";
+    default:
+      return "en-IN";
+  }
 }
